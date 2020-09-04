@@ -114,6 +114,7 @@ public final class SystemSessionProperties
     public static final String ENABLE_STATS_CALCULATOR = "enable_stats_calculator";
     public static final String IGNORE_STATS_CALCULATOR_FAILURES = "ignore_stats_calculator_failures";
     public static final String MAX_DRIVERS_PER_TASK = "max_drivers_per_task";
+    public static final String DISTINCT_LIMIT_SPILL_ENABLE = "distinct_limit_spill_enable";
 
     private final List<PropertyMetadata<?>> sessionProperties;
 
@@ -124,414 +125,419 @@ public final class SystemSessionProperties
 
     @Inject
     public SystemSessionProperties(
-            QueryManagerConfig queryManagerConfig,
-            TaskManagerConfig taskManagerConfig,
-            MemoryManagerConfig memoryManagerConfig,
-            FeaturesConfig featuresConfig)
+        QueryManagerConfig queryManagerConfig,
+        TaskManagerConfig taskManagerConfig,
+        MemoryManagerConfig memoryManagerConfig,
+        FeaturesConfig featuresConfig)
     {
         sessionProperties = ImmutableList.of(
-                stringProperty(
-                        EXECUTION_POLICY,
-                        "Policy used for scheduling query tasks",
-                        queryManagerConfig.getQueryExecutionPolicy(),
-                        false),
-                booleanProperty(
-                        OPTIMIZE_HASH_GENERATION,
-                        "Compute hash codes for distribution, joins, and aggregations early in query plan",
-                        featuresConfig.isOptimizeHashGeneration(),
-                        false),
-                booleanProperty(
-                        DISTRIBUTED_JOIN,
-                        "(DEPRECATED) Use a distributed join instead of a broadcast join. If this is set, join_distribution_type is ignored.",
-                        null,
-                        false),
-                new PropertyMetadata<>(
-                        JOIN_DISTRIBUTION_TYPE,
-                        format("The join method to use. Options are %s",
-                                Stream.of(JoinDistributionType.values())
-                                        .map(JoinDistributionType::name)
-                                        .collect(joining(","))),
-                        VARCHAR,
-                        JoinDistributionType.class,
-                        featuresConfig.getJoinDistributionType(),
-                        false,
-                        value -> JoinDistributionType.valueOf(((String) value).toUpperCase()),
-                        JoinDistributionType::name),
-                new PropertyMetadata<>(
-                        JOIN_MAX_BROADCAST_TABLE_SIZE,
-                        "Maximum estimated size of a table that can be broadcast for JOIN.",
-                        VARCHAR,
-                        DataSize.class,
-                        featuresConfig.getJoinMaxBroadcastTableSize(),
-                        true,
-                        value -> DataSize.valueOf((String) value),
-                        DataSize::toString),
-                booleanProperty(
-                        DISTRIBUTED_INDEX_JOIN,
-                        "Distribute index joins on join keys instead of executing inline",
-                        featuresConfig.isDistributedIndexJoinsEnabled(),
-                        false),
-                integerProperty(
-                        HASH_PARTITION_COUNT,
-                        "Number of partitions for distributed joins and aggregations",
-                        queryManagerConfig.getInitialHashPartitions(),
-                        false),
-                booleanProperty(
-                        GROUPED_EXECUTION_FOR_AGGREGATION,
-                        "Use grouped execution for aggregation when possible",
-                        featuresConfig.isGroupedExecutionForAggregationEnabled(),
-                        false),
-                booleanProperty(
-                        PREFER_STREAMING_OPERATORS,
-                        "Prefer source table layouts that produce streaming operators",
-                        false,
-                        false),
-                new PropertyMetadata<>(
-                        TASK_WRITER_COUNT,
-                        "Default number of local parallel table writer jobs per worker",
-                        BIGINT,
-                        Integer.class,
-                        taskManagerConfig.getWriterCount(),
-                        false,
-                        value -> validateValueIsPowerOfTwo(value, TASK_WRITER_COUNT),
-                        value -> value),
-                booleanProperty(
-                        REDISTRIBUTE_WRITES,
-                        "Force parallel distributed writes",
-                        featuresConfig.isRedistributeWrites(),
-                        false),
-                booleanProperty(
-                        SCALE_WRITERS,
-                        "Scale out writers based on throughput (use minimum necessary)",
-                        featuresConfig.isScaleWriters(),
-                        false),
-                new PropertyMetadata<>(
-                        WRITER_MIN_SIZE,
-                        "Target minimum size of writer output when scaling writers",
-                        VARCHAR,
-                        DataSize.class,
-                        featuresConfig.getWriterMinSize(),
-                        false,
-                        value -> DataSize.valueOf((String) value),
-                        DataSize::toString),
-                booleanProperty(
-                        PUSH_TABLE_WRITE_THROUGH_UNION,
-                        "Parallelize writes when using UNION ALL in queries that write data",
-                        featuresConfig.isPushTableWriteThroughUnion(),
-                        false),
-                new PropertyMetadata<>(
-                        TASK_CONCURRENCY,
-                        "Default number of local parallel jobs per worker",
-                        BIGINT,
-                        Integer.class,
-                        taskManagerConfig.getTaskConcurrency(),
-                        false,
-                        value -> validateValueIsPowerOfTwo(value, TASK_CONCURRENCY),
-                        value -> value),
-                booleanProperty(
-                        TASK_SHARE_INDEX_LOADING,
-                        "Share index join lookups and caching within a task",
-                        taskManagerConfig.isShareIndexLoading(),
-                        false),
-                new PropertyMetadata<>(
-                        QUERY_MAX_RUN_TIME,
-                        "Maximum run time of a query (includes the queueing time)",
-                        VARCHAR,
-                        Duration.class,
-                        queryManagerConfig.getQueryMaxRunTime(),
-                        false,
-                        value -> Duration.valueOf((String) value),
-                        Duration::toString),
-                new PropertyMetadata<>(
-                        QUERY_MAX_EXECUTION_TIME,
-                        "Maximum execution time of a query",
-                        VARCHAR,
-                        Duration.class,
-                        queryManagerConfig.getQueryMaxExecutionTime(),
-                        false,
-                        value -> Duration.valueOf((String) value),
-                        Duration::toString),
-                new PropertyMetadata<>(
-                        QUERY_MAX_CPU_TIME,
-                        "Maximum CPU time of a query",
-                        VARCHAR,
-                        Duration.class,
-                        queryManagerConfig.getQueryMaxCpuTime(),
-                        false,
-                        value -> Duration.valueOf((String) value),
-                        Duration::toString),
-                new PropertyMetadata<>(
-                        QUERY_MAX_MEMORY,
-                        "Maximum amount of distributed memory a query can use",
-                        VARCHAR,
-                        DataSize.class,
-                        memoryManagerConfig.getMaxQueryMemory(),
-                        true,
-                        value -> DataSize.valueOf((String) value),
-                        DataSize::toString),
-                new PropertyMetadata<>(
-                        QUERY_MAX_TOTAL_MEMORY,
-                        "Maximum amount of distributed total memory a query can use",
-                        VARCHAR,
-                        DataSize.class,
-                        memoryManagerConfig.getMaxQueryTotalMemory(),
-                        true,
-                        value -> DataSize.valueOf((String) value),
-                        DataSize::toString),
-                booleanProperty(
-                        RESOURCE_OVERCOMMIT,
-                        "Use resources which are not guaranteed to be available to the query",
-                        false,
-                        false),
-                integerProperty(
-                        QUERY_MAX_STAGE_COUNT,
-                        "Temporary: Maximum number of stages a query can have",
-                        queryManagerConfig.getMaxStageCount(),
-                        true),
-                booleanProperty(
-                        DICTIONARY_AGGREGATION,
-                        "Enable optimization for aggregations on dictionaries",
-                        featuresConfig.isDictionaryAggregation(),
-                        false),
-                integerProperty(
-                        INITIAL_SPLITS_PER_NODE,
-                        "The number of splits each node will run per task, initially",
-                        taskManagerConfig.getInitialSplitsPerNode(),
-                        false),
-                new PropertyMetadata<>(
-                        SPLIT_CONCURRENCY_ADJUSTMENT_INTERVAL,
-                        "Experimental: Interval between changes to the number of concurrent splits per node",
-                        VARCHAR,
-                        Duration.class,
-                        taskManagerConfig.getSplitConcurrencyAdjustmentInterval(),
-                        false,
-                        value -> Duration.valueOf((String) value),
-                        Duration::toString),
-                booleanProperty(
-                        OPTIMIZE_METADATA_QUERIES,
-                        "Enable optimization for metadata queries",
-                        featuresConfig.isOptimizeMetadataQueries(),
-                        false),
-                integerProperty(
-                        QUERY_PRIORITY,
-                        "The priority of queries. Larger numbers are higher priority",
-                        1,
-                        false),
-                booleanProperty(
-                        PLAN_WITH_TABLE_NODE_PARTITIONING,
-                        "Experimental: Adapt plan to pre-partitioned tables",
-                        true,
-                        false),
-                booleanProperty(
-                        REORDER_JOINS,
-                        "(DEPRECATED) Reorder joins to remove unnecessary cross joins. If this is set, join_reordering_strategy will be ignored",
-                        null,
-                        false),
-                new PropertyMetadata<>(
-                        JOIN_REORDERING_STRATEGY,
-                        format("The join reordering strategy to use. Options are %s",
-                                Stream.of(JoinReorderingStrategy.values())
-                                        .map(JoinReorderingStrategy::name)
-                                        .collect(joining(","))),
-                        VARCHAR,
-                        JoinReorderingStrategy.class,
-                        featuresConfig.getJoinReorderingStrategy(),
-                        false,
-                        value -> JoinReorderingStrategy.valueOf(((String) value).toUpperCase()),
-                        JoinReorderingStrategy::name),
-                new PropertyMetadata<>(
-                        MAX_REORDERED_JOINS,
-                        "The maximum number of joins to reorder as one group in cost-based join reordering",
-                        BIGINT,
-                        Integer.class,
-                        featuresConfig.getMaxReorderedJoins(),
-                        false,
-                        value -> {
-                            int intValue = ((Number) requireNonNull(value, "value is null")).intValue();
-                            if (intValue < 2) {
-                                throw new PrestoException(INVALID_SESSION_PROPERTY, format("%s must be greater than or equal to 2: %s", MAX_REORDERED_JOINS, intValue));
-                            }
-                            return intValue;
-                        },
-                        value -> value),
-                booleanProperty(
-                        FAST_INEQUALITY_JOINS,
-                        "Use faster handling of inequality join if it is possible",
-                        featuresConfig.isFastInequalityJoins(),
-                        false),
-                booleanProperty(
-                        COLOCATED_JOIN,
-                        "Experimental: Use a colocated join when possible",
-                        featuresConfig.isColocatedJoinsEnabled(),
-                        false),
-                booleanProperty(
-                        SPATIAL_JOIN,
-                        "Use spatial index for spatial join when possible",
-                        featuresConfig.isSpatialJoinsEnabled(),
-                        false),
-                stringProperty(
-                        SPATIAL_PARTITIONING_TABLE_NAME,
-                        "Name of the table containing spatial partitioning scheme",
-                        null,
-                        false),
-                integerProperty(
-                        CONCURRENT_LIFESPANS_PER_NODE,
-                        "Experimental: Run a fixed number of groups concurrently for eligible JOINs",
-                        featuresConfig.getConcurrentLifespansPerTask(),
-                        false),
-                new PropertyMetadata<>(
-                        SPILL_ENABLED,
-                        "Experimental: Enable spilling",
-                        BOOLEAN,
-                        Boolean.class,
-                        featuresConfig.isSpillEnabled(),
-                        false,
-                        value -> {
-                            boolean spillEnabled = (Boolean) value;
-                            if (spillEnabled && featuresConfig.getSpillerSpillPaths().isEmpty()) {
-                                throw new PrestoException(
-                                        INVALID_SESSION_PROPERTY,
-                                        format("%s cannot be set to true; no spill paths configured", SPILL_ENABLED));
-                            }
-                            return spillEnabled;
-                        },
-                        value -> value),
-                new PropertyMetadata<>(
-                        AGGREGATION_OPERATOR_UNSPILL_MEMORY_LIMIT,
-                        "Experimental: How much memory can should be allocated per aggragation operator in unspilling process",
-                        VARCHAR,
-                        DataSize.class,
-                        featuresConfig.getAggregationOperatorUnspillMemoryLimit(),
-                        false,
-                        value -> DataSize.valueOf((String) value),
-                        DataSize::toString),
-                booleanProperty(
-                        OPTIMIZE_DISTINCT_AGGREGATIONS,
-                        "Optimize mixed non-distinct and distinct aggregations",
-                        featuresConfig.isOptimizeMixedDistinctAggregations(),
-                        false),
-                booleanProperty(
-                        LEGACY_ROW_FIELD_ORDINAL_ACCESS,
-                        "Allow accessing anonymous row field with .field0, .field1, ...",
-                        featuresConfig.isLegacyRowFieldOrdinalAccess(),
-                        false),
-                booleanProperty(
-                        ITERATIVE_OPTIMIZER,
-                        "Experimental: enable iterative optimizer",
-                        featuresConfig.isIterativeOptimizerEnabled(),
-                        false),
-                new PropertyMetadata<>(
-                        ITERATIVE_OPTIMIZER_TIMEOUT,
-                        "Timeout for plan optimization in iterative optimizer",
-                        VARCHAR,
-                        Duration.class,
-                        featuresConfig.getIterativeOptimizerTimeout(),
-                        false,
-                        value -> Duration.valueOf((String) value),
-                        Duration::toString),
-                booleanProperty(
-                        EXCHANGE_COMPRESSION,
-                        "Enable compression in exchanges",
-                        featuresConfig.isExchangeCompressionEnabled(),
-                        false),
-                booleanProperty(
-                        LEGACY_TIMESTAMP,
-                        "Use legacy TIME & TIMESTAMP semantics (warning: this will be removed)",
-                        featuresConfig.isLegacyTimestamp(),
-                        true),
-                booleanProperty(
-                        ENABLE_INTERMEDIATE_AGGREGATIONS,
-                        "Enable the use of intermediate aggregations",
-                        featuresConfig.isEnableIntermediateAggregations(),
-                        false),
-                booleanProperty(
-                        PUSH_AGGREGATION_THROUGH_JOIN,
-                        "Allow pushing aggregations below joins",
-                        featuresConfig.isPushAggregationThroughJoin(),
-                        false),
-                booleanProperty(
-                        PUSH_PARTIAL_AGGREGATION_THROUGH_JOIN,
-                        "Push partial aggregations below joins",
-                        false,
-                        false),
-                booleanProperty(
-                        PARSE_DECIMAL_LITERALS_AS_DOUBLE,
-                        "Parse decimal literals as DOUBLE instead of DECIMAL",
-                        featuresConfig.isParseDecimalLiteralsAsDouble(),
-                        false),
-                booleanProperty(
-                        FORCE_SINGLE_NODE_OUTPUT,
-                        "Force single node output",
-                        featuresConfig.isForceSingleNodeOutput(),
-                        true),
-                new PropertyMetadata<>(
-                        FILTER_AND_PROJECT_MIN_OUTPUT_PAGE_SIZE,
-                        "Experimental: Minimum output page size for filter and project operators",
-                        VARCHAR,
-                        DataSize.class,
-                        featuresConfig.getFilterAndProjectMinOutputPageSize(),
-                        false,
-                        value -> DataSize.valueOf((String) value),
-                        DataSize::toString),
-                integerProperty(
-                        FILTER_AND_PROJECT_MIN_OUTPUT_PAGE_ROW_COUNT,
-                        "Experimental: Minimum output page row count for filter and project operators",
-                        featuresConfig.getFilterAndProjectMinOutputPageRowCount(),
-                        false),
-                booleanProperty(
-                        DISTRIBUTED_SORT,
-                        "Parallelize sort across multiple nodes",
-                        featuresConfig.isDistributedSortEnabled(),
-                        false),
-                booleanProperty(
-                        USE_MARK_DISTINCT,
-                        "Implement DISTINCT aggregations using MarkDistinct",
-                        featuresConfig.isUseMarkDistinct(),
-                        false),
-                booleanProperty(
-                        PREFER_PARTITIAL_AGGREGATION,
-                        "Prefer splitting aggregations into partial and final stages",
-                        featuresConfig.isPreferPartialAggregation(),
-                        false),
-                booleanProperty(
-                        OPTIMIZE_TOP_N_ROW_NUMBER,
-                        "Use top N row number optimization",
-                        featuresConfig.isOptimizeTopNRowNumber(),
-                        false),
-                integerProperty(
-                        MAX_GROUPING_SETS,
-                        "Maximum number of grouping sets in a GROUP BY",
-                        featuresConfig.getMaxGroupingSets(),
-                        true),
-                booleanProperty(
-                        LEGACY_UNNEST,
-                        "Using legacy unnest semantic, where unnest(array(row)) will create one column of type row",
-                        featuresConfig.isLegacyUnnestArrayRows(),
-                        false),
-                booleanProperty(
-                        STATISTICS_CPU_TIMER_ENABLED,
-                        "Experimental: Enable cpu time tracking for automatic column statistics collection on write",
-                        taskManagerConfig.isStatisticsCpuTimerEnabled(),
-                        false),
-                booleanProperty(
-                        ENABLE_STATS_CALCULATOR,
-                        "Experimental: Enable statistics calculator",
-                        featuresConfig.isEnableStatsCalculator(),
-                        false),
-                new PropertyMetadata<>(
-                        MAX_DRIVERS_PER_TASK,
-                        "Maximum number of drivers per task",
-                        INTEGER,
-                        Integer.class,
-                        null,
-                        false,
-                        value -> min(taskManagerConfig.getMaxDriversPerTask(), validateNullablePositiveIntegerValue(value, MAX_DRIVERS_PER_TASK)),
-                        object -> object),
-                booleanProperty(
-                        IGNORE_STATS_CALCULATOR_FAILURES,
-                        "Ignore statistics calculator failures",
-                        featuresConfig.isIgnoreStatsCalculatorFailures(),
-                        false));
+            stringProperty(
+                EXECUTION_POLICY,
+                "Policy used for scheduling query tasks",
+                queryManagerConfig.getQueryExecutionPolicy(),
+                false),
+            booleanProperty(
+                OPTIMIZE_HASH_GENERATION,
+                "Compute hash codes for distribution, joins, and aggregations early in query plan",
+                featuresConfig.isOptimizeHashGeneration(),
+                false),
+            booleanProperty(
+                DISTRIBUTED_JOIN,
+                "(DEPRECATED) Use a distributed join instead of a broadcast join. If this is set, join_distribution_type is ignored.",
+                null,
+                false),
+            new PropertyMetadata<>(
+                JOIN_DISTRIBUTION_TYPE,
+                format("The join method to use. Options are %s",
+                    Stream.of(JoinDistributionType.values())
+                        .map(JoinDistributionType::name)
+                        .collect(joining(","))),
+                VARCHAR,
+                JoinDistributionType.class,
+                featuresConfig.getJoinDistributionType(),
+                false,
+                value -> JoinDistributionType.valueOf(((String) value).toUpperCase()),
+                JoinDistributionType::name),
+            new PropertyMetadata<>(
+                JOIN_MAX_BROADCAST_TABLE_SIZE,
+                "Maximum estimated size of a table that can be broadcast for JOIN.",
+                VARCHAR,
+                DataSize.class,
+                featuresConfig.getJoinMaxBroadcastTableSize(),
+                true,
+                value -> DataSize.valueOf((String) value),
+                DataSize::toString),
+            booleanProperty(
+                DISTRIBUTED_INDEX_JOIN,
+                "Distribute index joins on join keys instead of executing inline",
+                featuresConfig.isDistributedIndexJoinsEnabled(),
+                false),
+            integerProperty(
+                HASH_PARTITION_COUNT,
+                "Number of partitions for distributed joins and aggregations",
+                queryManagerConfig.getInitialHashPartitions(),
+                false),
+            booleanProperty(
+                GROUPED_EXECUTION_FOR_AGGREGATION,
+                "Use grouped execution for aggregation when possible",
+                featuresConfig.isGroupedExecutionForAggregationEnabled(),
+                false),
+            booleanProperty(
+                PREFER_STREAMING_OPERATORS,
+                "Prefer source table layouts that produce streaming operators",
+                false,
+                false),
+            new PropertyMetadata<>(
+                TASK_WRITER_COUNT,
+                "Default number of local parallel table writer jobs per worker",
+                BIGINT,
+                Integer.class,
+                taskManagerConfig.getWriterCount(),
+                false,
+                value -> validateValueIsPowerOfTwo(value, TASK_WRITER_COUNT),
+                value -> value),
+            booleanProperty(
+                REDISTRIBUTE_WRITES,
+                "Force parallel distributed writes",
+                featuresConfig.isRedistributeWrites(),
+                false),
+            booleanProperty(
+                SCALE_WRITERS,
+                "Scale out writers based on throughput (use minimum necessary)",
+                featuresConfig.isScaleWriters(),
+                false),
+            new PropertyMetadata<>(
+                WRITER_MIN_SIZE,
+                "Target minimum size of writer output when scaling writers",
+                VARCHAR,
+                DataSize.class,
+                featuresConfig.getWriterMinSize(),
+                false,
+                value -> DataSize.valueOf((String) value),
+                DataSize::toString),
+            booleanProperty(
+                PUSH_TABLE_WRITE_THROUGH_UNION,
+                "Parallelize writes when using UNION ALL in queries that write data",
+                featuresConfig.isPushTableWriteThroughUnion(),
+                false),
+            new PropertyMetadata<>(
+                TASK_CONCURRENCY,
+                "Default number of local parallel jobs per worker",
+                BIGINT,
+                Integer.class,
+                taskManagerConfig.getTaskConcurrency(),
+                false,
+                value -> validateValueIsPowerOfTwo(value, TASK_CONCURRENCY),
+                value -> value),
+            booleanProperty(
+                TASK_SHARE_INDEX_LOADING,
+                "Share index join lookups and caching within a task",
+                taskManagerConfig.isShareIndexLoading(),
+                false),
+            new PropertyMetadata<>(
+                QUERY_MAX_RUN_TIME,
+                "Maximum run time of a query (includes the queueing time)",
+                VARCHAR,
+                Duration.class,
+                queryManagerConfig.getQueryMaxRunTime(),
+                false,
+                value -> Duration.valueOf((String) value),
+                Duration::toString),
+            new PropertyMetadata<>(
+                QUERY_MAX_EXECUTION_TIME,
+                "Maximum execution time of a query",
+                VARCHAR,
+                Duration.class,
+                queryManagerConfig.getQueryMaxExecutionTime(),
+                false,
+                value -> Duration.valueOf((String) value),
+                Duration::toString),
+            new PropertyMetadata<>(
+                QUERY_MAX_CPU_TIME,
+                "Maximum CPU time of a query",
+                VARCHAR,
+                Duration.class,
+                queryManagerConfig.getQueryMaxCpuTime(),
+                false,
+                value -> Duration.valueOf((String) value),
+                Duration::toString),
+            new PropertyMetadata<>(
+                QUERY_MAX_MEMORY,
+                "Maximum amount of distributed memory a query can use",
+                VARCHAR,
+                DataSize.class,
+                memoryManagerConfig.getMaxQueryMemory(),
+                true,
+                value -> DataSize.valueOf((String) value),
+                DataSize::toString),
+            new PropertyMetadata<>(
+                QUERY_MAX_TOTAL_MEMORY,
+                "Maximum amount of distributed total memory a query can use",
+                VARCHAR,
+                DataSize.class,
+                memoryManagerConfig.getMaxQueryTotalMemory(),
+                true,
+                value -> DataSize.valueOf((String) value),
+                DataSize::toString),
+            booleanProperty(
+                RESOURCE_OVERCOMMIT,
+                "Use resources which are not guaranteed to be available to the query",
+                false,
+                false),
+            integerProperty(
+                QUERY_MAX_STAGE_COUNT,
+                "Temporary: Maximum number of stages a query can have",
+                queryManagerConfig.getMaxStageCount(),
+                true),
+            booleanProperty(
+                DICTIONARY_AGGREGATION,
+                "Enable optimization for aggregations on dictionaries",
+                featuresConfig.isDictionaryAggregation(),
+                false),
+            integerProperty(
+                INITIAL_SPLITS_PER_NODE,
+                "The number of splits each node will run per task, initially",
+                taskManagerConfig.getInitialSplitsPerNode(),
+                false),
+            new PropertyMetadata<>(
+                SPLIT_CONCURRENCY_ADJUSTMENT_INTERVAL,
+                "Experimental: Interval between changes to the number of concurrent splits per node",
+                VARCHAR,
+                Duration.class,
+                taskManagerConfig.getSplitConcurrencyAdjustmentInterval(),
+                false,
+                value -> Duration.valueOf((String) value),
+                Duration::toString),
+            booleanProperty(
+                OPTIMIZE_METADATA_QUERIES,
+                "Enable optimization for metadata queries",
+                featuresConfig.isOptimizeMetadataQueries(),
+                false),
+            integerProperty(
+                QUERY_PRIORITY,
+                "The priority of queries. Larger numbers are higher priority",
+                1,
+                false),
+            booleanProperty(
+                PLAN_WITH_TABLE_NODE_PARTITIONING,
+                "Experimental: Adapt plan to pre-partitioned tables",
+                true,
+                false),
+            booleanProperty(
+                REORDER_JOINS,
+                "(DEPRECATED) Reorder joins to remove unnecessary cross joins. If this is set, join_reordering_strategy will be ignored",
+                null,
+                false),
+            new PropertyMetadata<>(
+                JOIN_REORDERING_STRATEGY,
+                format("The join reordering strategy to use. Options are %s",
+                    Stream.of(JoinReorderingStrategy.values())
+                        .map(JoinReorderingStrategy::name)
+                        .collect(joining(","))),
+                VARCHAR,
+                JoinReorderingStrategy.class,
+                featuresConfig.getJoinReorderingStrategy(),
+                false,
+                value -> JoinReorderingStrategy.valueOf(((String) value).toUpperCase()),
+                JoinReorderingStrategy::name),
+            new PropertyMetadata<>(
+                MAX_REORDERED_JOINS,
+                "The maximum number of joins to reorder as one group in cost-based join reordering",
+                BIGINT,
+                Integer.class,
+                featuresConfig.getMaxReorderedJoins(),
+                false,
+                value -> {
+                    int intValue = ((Number) requireNonNull(value, "value is null")).intValue();
+                    if (intValue < 2) {
+                        throw new PrestoException(INVALID_SESSION_PROPERTY, format("%s must be greater than or equal to 2: %s", MAX_REORDERED_JOINS, intValue));
+                    }
+                    return intValue;
+                },
+                value -> value),
+            booleanProperty(
+                FAST_INEQUALITY_JOINS,
+                "Use faster handling of inequality join if it is possible",
+                featuresConfig.isFastInequalityJoins(),
+                false),
+            booleanProperty(
+                COLOCATED_JOIN,
+                "Experimental: Use a colocated join when possible",
+                featuresConfig.isColocatedJoinsEnabled(),
+                false),
+            booleanProperty(
+                SPATIAL_JOIN,
+                "Use spatial index for spatial join when possible",
+                featuresConfig.isSpatialJoinsEnabled(),
+                false),
+            stringProperty(
+                SPATIAL_PARTITIONING_TABLE_NAME,
+                "Name of the table containing spatial partitioning scheme",
+                null,
+                false),
+            integerProperty(
+                CONCURRENT_LIFESPANS_PER_NODE,
+                "Experimental: Run a fixed number of groups concurrently for eligible JOINs",
+                featuresConfig.getConcurrentLifespansPerTask(),
+                false),
+            new PropertyMetadata<>(
+                SPILL_ENABLED,
+                "Experimental: Enable spilling",
+                BOOLEAN,
+                Boolean.class,
+                featuresConfig.isSpillEnabled(),
+                false,
+                value -> {
+                    boolean spillEnabled = (Boolean) value;
+                    if (spillEnabled && featuresConfig.getSpillerSpillPaths().isEmpty()) {
+                        throw new PrestoException(
+                            INVALID_SESSION_PROPERTY,
+                            format("%s cannot be set to true; no spill paths configured", SPILL_ENABLED));
+                    }
+                    return spillEnabled;
+                },
+                value -> value),
+            new PropertyMetadata<>(
+                AGGREGATION_OPERATOR_UNSPILL_MEMORY_LIMIT,
+                "Experimental: How much memory can should be allocated per aggragation operator in unspilling process",
+                VARCHAR,
+                DataSize.class,
+                featuresConfig.getAggregationOperatorUnspillMemoryLimit(),
+                false,
+                value -> DataSize.valueOf((String) value),
+                DataSize::toString),
+            booleanProperty(
+                OPTIMIZE_DISTINCT_AGGREGATIONS,
+                "Optimize mixed non-distinct and distinct aggregations",
+                featuresConfig.isOptimizeMixedDistinctAggregations(),
+                false),
+            booleanProperty(
+                LEGACY_ROW_FIELD_ORDINAL_ACCESS,
+                "Allow accessing anonymous row field with .field0, .field1, ...",
+                featuresConfig.isLegacyRowFieldOrdinalAccess(),
+                false),
+            booleanProperty(
+                ITERATIVE_OPTIMIZER,
+                "Experimental: enable iterative optimizer",
+                featuresConfig.isIterativeOptimizerEnabled(),
+                false),
+            new PropertyMetadata<>(
+                ITERATIVE_OPTIMIZER_TIMEOUT,
+                "Timeout for plan optimization in iterative optimizer",
+                VARCHAR,
+                Duration.class,
+                featuresConfig.getIterativeOptimizerTimeout(),
+                false,
+                value -> Duration.valueOf((String) value),
+                Duration::toString),
+            booleanProperty(
+                EXCHANGE_COMPRESSION,
+                "Enable compression in exchanges",
+                featuresConfig.isExchangeCompressionEnabled(),
+                false),
+            booleanProperty(
+                LEGACY_TIMESTAMP,
+                "Use legacy TIME & TIMESTAMP semantics (warning: this will be removed)",
+                featuresConfig.isLegacyTimestamp(),
+                true),
+            booleanProperty(
+                ENABLE_INTERMEDIATE_AGGREGATIONS,
+                "Enable the use of intermediate aggregations",
+                featuresConfig.isEnableIntermediateAggregations(),
+                false),
+            booleanProperty(
+                PUSH_AGGREGATION_THROUGH_JOIN,
+                "Allow pushing aggregations below joins",
+                featuresConfig.isPushAggregationThroughJoin(),
+                false),
+            booleanProperty(
+                PUSH_PARTIAL_AGGREGATION_THROUGH_JOIN,
+                "Push partial aggregations below joins",
+                false,
+                false),
+            booleanProperty(
+                PARSE_DECIMAL_LITERALS_AS_DOUBLE,
+                "Parse decimal literals as DOUBLE instead of DECIMAL",
+                featuresConfig.isParseDecimalLiteralsAsDouble(),
+                false),
+            booleanProperty(
+                FORCE_SINGLE_NODE_OUTPUT,
+                "Force single node output",
+                featuresConfig.isForceSingleNodeOutput(),
+                true),
+            new PropertyMetadata<>(
+                FILTER_AND_PROJECT_MIN_OUTPUT_PAGE_SIZE,
+                "Experimental: Minimum output page size for filter and project operators",
+                VARCHAR,
+                DataSize.class,
+                featuresConfig.getFilterAndProjectMinOutputPageSize(),
+                false,
+                value -> DataSize.valueOf((String) value),
+                DataSize::toString),
+            integerProperty(
+                FILTER_AND_PROJECT_MIN_OUTPUT_PAGE_ROW_COUNT,
+                "Experimental: Minimum output page row count for filter and project operators",
+                featuresConfig.getFilterAndProjectMinOutputPageRowCount(),
+                false),
+            booleanProperty(
+                DISTRIBUTED_SORT,
+                "Parallelize sort across multiple nodes",
+                featuresConfig.isDistributedSortEnabled(),
+                false),
+            booleanProperty(
+                USE_MARK_DISTINCT,
+                "Implement DISTINCT aggregations using MarkDistinct",
+                featuresConfig.isUseMarkDistinct(),
+                false),
+            booleanProperty(
+                PREFER_PARTITIAL_AGGREGATION,
+                "Prefer splitting aggregations into partial and final stages",
+                featuresConfig.isPreferPartialAggregation(),
+                false),
+            booleanProperty(
+                OPTIMIZE_TOP_N_ROW_NUMBER,
+                "Use top N row number optimization",
+                featuresConfig.isOptimizeTopNRowNumber(),
+                false),
+            integerProperty(
+                MAX_GROUPING_SETS,
+                "Maximum number of grouping sets in a GROUP BY",
+                featuresConfig.getMaxGroupingSets(),
+                true),
+            booleanProperty(
+                LEGACY_UNNEST,
+                "Using legacy unnest semantic, where unnest(array(row)) will create one column of type row",
+                featuresConfig.isLegacyUnnestArrayRows(),
+                false),
+            booleanProperty(
+                STATISTICS_CPU_TIMER_ENABLED,
+                "Experimental: Enable cpu time tracking for automatic column statistics collection on write",
+                taskManagerConfig.isStatisticsCpuTimerEnabled(),
+                false),
+            booleanProperty(
+                ENABLE_STATS_CALCULATOR,
+                "Experimental: Enable statistics calculator",
+                featuresConfig.isEnableStatsCalculator(),
+                false),
+            new PropertyMetadata<>(
+                MAX_DRIVERS_PER_TASK,
+                "Maximum number of drivers per task",
+                INTEGER,
+                Integer.class,
+                null,
+                false,
+                value -> min(taskManagerConfig.getMaxDriversPerTask(), validateNullablePositiveIntegerValue(value, MAX_DRIVERS_PER_TASK)),
+                object -> object),
+            booleanProperty(
+                IGNORE_STATS_CALCULATOR_FAILURES,
+                "Ignore statistics calculator failures",
+                featuresConfig.isIgnoreStatsCalculatorFailures(),
+                false),
+            booleanProperty(
+                DISTINCT_LIMIT_SPILL_ENABLE,
+                "enable distinct limit spill to disks",
+                false,
+                false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -567,6 +573,8 @@ public final class SystemSessionProperties
     {
         return Optional.ofNullable(session.getSystemProperty(JOIN_MAX_BROADCAST_TABLE_SIZE, DataSize.class));
     }
+
+    public static boolean isDistinctLimitSpillEnable(Session session) { return session.getSystemProperty(DISTINCT_LIMIT_SPILL_ENABLE, Boolean.class); }
 
     public static boolean isDistributedIndexJoinEnabled(Session session)
     {
@@ -861,8 +869,8 @@ public final class SystemSessionProperties
         int intValue = ((Number) requireNonNull(value, "value is null")).intValue();
         if (Integer.bitCount(intValue) != 1) {
             throw new PrestoException(
-                    INVALID_SESSION_PROPERTY,
-                    format("%s must be a power of 2: %s", property, intValue));
+                INVALID_SESSION_PROPERTY,
+                format("%s must be a power of 2: %s", property, intValue));
         }
         return intValue;
     }

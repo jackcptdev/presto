@@ -28,6 +28,7 @@ import com.facebook.presto.operator.AggregationOperator.AggregationOperatorFacto
 import com.facebook.presto.operator.AssignUniqueIdOperator;
 import com.facebook.presto.operator.DeleteOperator.DeleteOperatorFactory;
 import com.facebook.presto.operator.DevNullOperator.DevNullOperatorFactory;
+import com.facebook.presto.operator.DistinctLimitSpilledOperator;
 import com.facebook.presto.operator.DriverFactory;
 import com.facebook.presto.operator.EnforceSingleRowOperator;
 import com.facebook.presto.operator.ExchangeClientSupplier;
@@ -211,6 +212,7 @@ import static com.facebook.presto.SystemSessionProperties.getFilterAndProjectMin
 import static com.facebook.presto.SystemSessionProperties.getFilterAndProjectMinOutputPageSize;
 import static com.facebook.presto.SystemSessionProperties.getTaskConcurrency;
 import static com.facebook.presto.SystemSessionProperties.getTaskWriterCount;
+import static com.facebook.presto.SystemSessionProperties.isDistinctLimitSpillEnable;
 import static com.facebook.presto.SystemSessionProperties.isExchangeCompressionEnabled;
 import static com.facebook.presto.SystemSessionProperties.isSpillEnabled;
 import static com.facebook.presto.metadata.FunctionKind.SCALAR;
@@ -775,7 +777,7 @@ public class LocalExecutionPlanner
             }
 
             // compute the layout of the output from the window operator
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             outputMappings.putAll(source.getLayout());
 
             // row number function goes in the last channel
@@ -820,7 +822,7 @@ public class LocalExecutionPlanner
             }
 
             // compute the layout of the output from the window operator
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             outputMappings.putAll(source.getLayout());
 
             if (!node.isPartial() || !partitionChannels.isEmpty()) {
@@ -904,7 +906,7 @@ public class LocalExecutionPlanner
             List<Symbol> windowFunctionOutputSymbols = windowFunctionOutputSymbolsBuilder.build();
 
             // compute the layout of the output from the window operator
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             for (Symbol symbol : node.getSource().getOutputSymbols()) {
                 outputMappings.put(symbol, source.getLayout().get(symbol));
             }
@@ -1007,14 +1009,35 @@ public class LocalExecutionPlanner
             Optional<Integer> hashChannel = node.getHashSymbol().map(channelGetter(source));
             List<Integer> distinctChannels = getChannelsForSymbols(node.getDistinctSymbols(), source.getLayout());
 
-            OperatorFactory operatorFactory = new DistinctLimitOperatorFactory(
-                    context.getNextOperatorId(),
-                    node.getId(),
-                    source.getTypes(),
-                    distinctChannels,
-                    node.getLimit(),
-                    hashChannel,
-                    joinCompiler);
+            boolean enableSpill = isDistinctLimitSpillEnable(session);
+
+            OperatorFactory operatorFactory = null;
+            if (enableSpill) {
+                operatorFactory = new DistinctLimitSpilledOperator.DistinctLimitSpilledOperatorFactory(
+                        context.getNextOperatorId(),
+                        node.getId(),
+                        source.getTypes(),
+                        distinctChannels,
+                        node.getLimit(),
+                        hashChannel,
+                        joinCompiler,
+                        pagesIndexFactory,
+                        singleStreamSpillerFactory,
+                        isDistinctLimitSpillEnable(session)
+                );
+            }
+            else {
+                operatorFactory = new DistinctLimitOperatorFactory(
+                        context.getNextOperatorId(),
+                        node.getId(),
+                        source.getTypes(),
+                        distinctChannels,
+                        node.getLimit(),
+                        hashChannel,
+                        joinCompiler
+                );
+            }
+
             return new PhysicalOperation(operatorFactory, makeLayout(node), context, source);
         }
 
@@ -1044,7 +1067,7 @@ public class LocalExecutionPlanner
             // for every grouping set, create a mapping of all output to input channels (including arguments)
             ImmutableList.Builder<Map<Integer, Integer>> mappings = ImmutableList.builder();
             for (List<Symbol> groupingSet : node.getGroupingSets()) {
-                ImmutableMap.Builder<Integer, Integer> setMapping = ImmutableMap.builder();
+                Builder<Integer, Integer> setMapping = ImmutableMap.builder();
 
                 for (Symbol output : groupingSet) {
                     setMapping.put(newLayout.get(output), source.getLayout().get(node.getGroupingColumns().get(output)));
@@ -1178,7 +1201,7 @@ public class LocalExecutionPlanner
             }
 
             // build output mapping
-            ImmutableMap.Builder<Symbol, Integer> outputMappingsBuilder = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappingsBuilder = ImmutableMap.builder();
             for (int i = 0; i < outputSymbols.size(); i++) {
                 Symbol symbol = outputSymbols.get(i);
                 outputMappingsBuilder.put(symbol, i);
@@ -1330,7 +1353,7 @@ public class LocalExecutionPlanner
             List<Integer> unnestChannels = getChannelsForSymbols(unnestSymbols, source.getLayout());
 
             // Source channels are always laid out first, followed by the unnested symbols
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             int channel = 0;
             for (Symbol symbol : node.getReplicateSymbols()) {
                 outputMappings.put(symbol, channel);
@@ -1538,7 +1561,7 @@ public class LocalExecutionPlanner
                     lifespan -> indexLookupSourceFactory,
                     indexLookupSourceFactory.getOutputTypes());
 
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             outputMappings.putAll(probeSource.getLayout());
 
             // inputs from index side of the join are laid out following the input from the probe side,
@@ -1739,7 +1762,7 @@ public class LocalExecutionPlanner
                     buildContext.getDriverInstanceCount(),
                     buildSource.getPipelineExecutionStrategy());
 
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             outputMappings.putAll(probeSource.getLayout());
 
             // inputs from build side of the join are laid out following the input from the probe side,
@@ -1779,7 +1802,7 @@ public class LocalExecutionPlanner
 
             OperatorFactory operator = createSpatialLookupJoin(node, probeNode, probeSource, probeSymbol, pagesSpatialIndexFactory, context);
 
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             List<Symbol> outputSymbols = node.getOutputSymbols();
             for (int i = 0; i < outputSymbols.size(); i++) {
                 Symbol symbol = outputSymbols.get(i);
@@ -1893,7 +1916,7 @@ public class LocalExecutionPlanner
 
             OperatorFactory operator = createLookupJoin(node, probeSource, probeSymbols, probeHashSymbol, lookupSourceFactory, context);
 
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             List<Symbol> outputSymbols = node.getOutputSymbols();
             for (int i = 0; i < outputSymbols.size(); i++) {
                 Symbol symbol = outputSymbols.get(i);
@@ -2154,7 +2177,7 @@ public class LocalExecutionPlanner
             // serialize writes by forcing data through a single writer
             PhysicalOperation source = node.getSource().accept(this, context);
 
-            ImmutableMap.Builder<Symbol, Integer> outputMapping = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMapping = ImmutableMap.builder();
             outputMapping.put(node.getOutputSymbols().get(0), ROW_COUNT_CHANNEL);
             outputMapping.put(node.getOutputSymbols().get(1), FRAGMENT_CHANNEL);
 
@@ -2219,7 +2242,7 @@ public class LocalExecutionPlanner
         {
             PhysicalOperation source = node.getSource().accept(this, context);
 
-            ImmutableMap.Builder<Symbol, Integer> outputMapping = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMapping = ImmutableMap.builder();
 
             OperatorFactory statisticsAggregation = node.getStatisticsAggregation().map(aggregation -> {
                 List<Symbol> groupingSymbols = aggregation.getGroupingSymbols();
@@ -2514,7 +2537,7 @@ public class LocalExecutionPlanner
 
         private PhysicalOperation planGlobalAggregation(AggregationNode node, PhysicalOperation source, LocalExecutionPlanContext context)
         {
-            ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
             AggregationOperatorFactory operatorFactory = createAggregationOperatorFactory(
                     node.getId(),
                     node.getAggregations(),
@@ -2532,7 +2555,7 @@ public class LocalExecutionPlanner
                 Map<Symbol, Aggregation> aggregations,
                 Step step,
                 int startOutputChannel,
-                ImmutableMap.Builder<Symbol, Integer> outputMappings,
+                Builder<Symbol, Integer> outputMappings,
                 PhysicalOperation source,
                 LocalExecutionPlanContext context,
                 boolean useSystemMemory)
@@ -2556,7 +2579,7 @@ public class LocalExecutionPlanner
                 DataSize unspillMemoryLimit,
                 LocalExecutionPlanContext context)
         {
-            ImmutableMap.Builder<Symbol, Integer> mappings = ImmutableMap.builder();
+            Builder<Symbol, Integer> mappings = ImmutableMap.builder();
             OperatorFactory operatorFactory = createHashAggregationOperatorFactory(
                     node.getId(),
                     node.getAggregations(),
@@ -2594,7 +2617,7 @@ public class LocalExecutionPlanner
                 DataSize unspillMemoryLimit,
                 LocalExecutionPlanContext context,
                 int startOutputChannel,
-                ImmutableMap.Builder<Symbol, Integer> outputMappings,
+                Builder<Symbol, Integer> outputMappings,
                 int expectedGroups,
                 Optional<DataSize> maxPartialAggregationMemorySize,
                 boolean useSystemMemory)
