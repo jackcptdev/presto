@@ -32,9 +32,8 @@ import java.util.List;
 import java.util.Optional;
 
 public class ExternalPagesSortChannel
-    implements Closeable
+        implements Closeable
 {
-
     private final List<Type> types;
 
     private final List<Integer> sortChannels;
@@ -47,22 +46,21 @@ public class ExternalPagesSortChannel
     private final OperatorContext operatorContext;
 
     private Iterator<Page> outPages;
-    private int currentOutputPageIndex = 0;
+    private int currentOutputPageIndex;
     private Page currentOutputPage;
     private SingleStreamSpiller spiller;
 
-    private ListenableFuture<?> spilling = null;
+    private ListenableFuture<?> spilling;
 
-    private long memorySizeInBytes = 0;
+    private long memorySizeInBytes;
 
     public ExternalPagesSortChannel(
-        List<Type> types,
-        List<Integer> sortChannels,
-        List<SortOrder> sortOrders,
-        PagesIndex.Factory pagesIndexFactory,
-        SingleStreamSpillerFactory singleStreamSpillerFactory,
-        OperatorContext operatorContext
-    )
+            List<Type> types,
+            List<Integer> sortChannels,
+            List<SortOrder> sortOrders,
+            PagesIndex.Factory pagesIndexFactory,
+            SingleStreamSpillerFactory singleStreamSpillerFactory,
+            OperatorContext operatorContext)
     {
         this.operatorContext = operatorContext;
         this.singleStreamSpillerFactory = singleStreamSpillerFactory;
@@ -92,16 +90,15 @@ public class ExternalPagesSortChannel
 
     public void getNextRow(PageBuilder pageBuilderWriteTo, PageBuilder pageCompareLastRow, int lastRowPosition)
     {
-
         if (pageCompareLastRow != null) {
             boolean lastRowEqNextRow = true;
             for (int i = 0; i < types.size(); i++) {
                 Type type = types.get(i);
                 boolean equal = TypeUtils.positionEqualsPosition(type,
-                    pageCompareLastRow.getBlockBuilder(i),
-                    lastRowPosition,
-                    this.currentOutputPage.getBlock(i),
-                    this.currentOutputPageIndex);
+                        pageCompareLastRow.getBlockBuilder(i),
+                        lastRowPosition,
+                        this.currentOutputPage.getBlock(i),
+                        this.currentOutputPageIndex);
                 if (!equal) {
                     lastRowEqNextRow = false;
                     break;
@@ -159,9 +156,9 @@ public class ExternalPagesSortChannel
         LinkedList<Page> outputPages = createOutputPages();
 
         Optional<SingleStreamSpiller> spiller = Optional.of(singleStreamSpillerFactory.create(
-            types,
-            operatorContext.getSpillContext().newLocalSpillContext(),
-            operatorContext.newLocalSystemMemoryContext(ExternalPagesSortChannel.class.getSimpleName())));
+                types,
+                operatorContext.getSpillContext().newLocalSpillContext(),
+                operatorContext.newLocalSystemMemoryContext(ExternalPagesSortChannel.class.getSimpleName())));
         this.spiller = spiller.get();
         ListenableFuture<?> future = this.spiller.spill(outputPages.iterator());
         this.spilling = future;
@@ -215,47 +212,9 @@ public class ExternalPagesSortChannel
         return pages;
     }
 
-//    private static LinkedList<Page> createOutputPages(PagesIndexPageSorter sorter, List<Type> types, List<Page> inputPages, long[] sortedAddresses)
-//    {
-//
-//        LinkedList<Page> pages = new LinkedList<>();
-//
-//        PageBuilder pageBuilder = null;
-//
-//        for (long address : sortedAddresses) {
-//
-//            if (pageBuilder == null) {
-//                pageBuilder = new PageBuilder(types);
-//                pageBuilder.reset();
-//            }
-//            int index = sorter.decodePageIndex(address);
-//            int position = sorter.decodePositionIndex(address);
-//
-//            Page page = inputPages.get(index);
-//            for (int i = 0; i < types.size(); i++) {
-//                Type type = types.get(i);
-//
-//                type.appendTo(page.getBlock(i), position, pageBuilder.getBlockBuilder(i));
-//            }
-//            pageBuilder.declarePosition();
-//
-//            if (pageBuilder.getPositionCount() >= 2) {
-//                pages.add(pageBuilder.build());
-//                pageBuilder = new PageBuilder(types);
-//                pageBuilder.reset();
-//            }
-//        }
-//
-//        if (pageBuilder.getPositionCount() > 0) {
-//            pages.add(pageBuilder.build());
-//        }
-//
-//        return pages;
-//    }
-
     @Override
     public void close()
-        throws IOException
+            throws IOException
     {
         if (this.spiller != null) {
             this.spiller.close();

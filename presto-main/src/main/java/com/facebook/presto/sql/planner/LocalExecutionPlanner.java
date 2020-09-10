@@ -1023,8 +1023,7 @@ public class LocalExecutionPlanner
                         joinCompiler,
                         pagesIndexFactory,
                         singleStreamSpillerFactory,
-                        isDistinctLimitSpillEnable(session)
-                );
+                        isDistinctLimitSpillEnable(session));
             }
             else {
                 operatorFactory = new DistinctLimitOperatorFactory(
@@ -1034,8 +1033,7 @@ public class LocalExecutionPlanner
                         distinctChannels,
                         node.getLimit(),
                         hashChannel,
-                        joinCompiler
-                );
+                        joinCompiler);
             }
 
             return new PhysicalOperation(operatorFactory, makeLayout(node), context, source);

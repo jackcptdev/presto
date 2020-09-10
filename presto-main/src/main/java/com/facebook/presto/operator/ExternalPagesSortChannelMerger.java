@@ -32,40 +32,32 @@ import java.util.PriorityQueue;
 import static java.util.Objects.requireNonNull;
 
 public class ExternalPagesSortChannelMerger
-    implements Closeable
+        implements Closeable
 {
-
     private final List<Type> types;
     private final List<Integer> sortChannels;
     private final List<SortOrder> sortOrders;
-
     private final PagesIndex.Factory pagesIndexFactory;
-
     private final List<ExternalPagesSortChannel> externalPagesChannels;
     private final PriorityQueue<ExternalPagesSortChannel> mergeQueue;
-
     private final long maxSizeInBytesPerChannel;
-
-    private PageBuilder lastRowPageBuilderForCompare;
     private final List<Page> currentMemoryPages;
-    private long memorySizeInBytes = 0;
-
     private final SingleStreamSpillerFactory singleStreamSpillerFactory;
-
     private final OperatorContext operatorContext;
 
-    private ExternalPagesSortChannel spillingChannel = null;
-
-    private boolean writeFinish = false;
-    private boolean readReady = false;
+    private ExternalPagesSortChannel spillingChannel;
+    private PageBuilder lastRowPageBuilderForCompare;
+    private boolean writeFinish;
+    private boolean readReady;
+    private long memorySizeInBytes;
 
     public ExternalPagesSortChannelMerger(List<Type> types,
-        List<Integer> sortChannels,
-        List<SortOrder> sortOrders,
-        PagesIndex.Factory pagesIndexFactory,
-        SingleStreamSpillerFactory singleStreamSpillerFactory,
-        OperatorContext operatorContext,
-        int maxSizeInBytesPerChannel)
+            List<Integer> sortChannels,
+            List<SortOrder> sortOrders,
+            PagesIndex.Factory pagesIndexFactory,
+            SingleStreamSpillerFactory singleStreamSpillerFactory,
+            OperatorContext operatorContext,
+            int maxSizeInBytesPerChannel)
     {
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
         this.singleStreamSpillerFactory = requireNonNull(singleStreamSpillerFactory, "");
@@ -81,7 +73,6 @@ public class ExternalPagesSortChannelMerger
             @Override
             public int compare(ExternalPagesSortChannel leftChannel, ExternalPagesSortChannel rightChannel)
             {
-
                 Page left = leftChannel.getCurrentOutputPage();
                 int leftIndex = leftChannel.getCurrentOutputPageIndex();
                 Page right = rightChannel.getCurrentOutputPage();
@@ -109,7 +100,6 @@ public class ExternalPagesSortChannelMerger
 
     public void tryClearSpillInProgressFuture()
     {
-
         if (this.spillingChannel != null && this.spillingChannel.getSpillingFuture().isDone()) {
             this.spillingChannel.spillFinish();
             this.spillingChannel = null;
@@ -216,11 +206,11 @@ public class ExternalPagesSortChannelMerger
     private void flushPages()
     {
         ExternalPagesSortChannel externalPagesChannel = new ExternalPagesSortChannel(
-            this.types,
-            this.sortChannels,
-            this.sortOrders,
-            this.pagesIndexFactory,
-            this.singleStreamSpillerFactory, this.operatorContext);
+                this.types,
+                this.sortChannels,
+                this.sortOrders,
+                this.pagesIndexFactory,
+                this.singleStreamSpillerFactory, this.operatorContext);
         for (Page page : this.currentMemoryPages) {
             externalPagesChannel.appendPage(page);
         }
@@ -238,7 +228,7 @@ public class ExternalPagesSortChannelMerger
 
     @Override
     public void close()
-        throws IOException
+            throws IOException
     {
         for (ExternalPagesSortChannel externalPagesSortChannel : this.externalPagesChannels) {
             externalPagesSortChannel.close();

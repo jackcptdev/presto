@@ -35,11 +35,21 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Objects.requireNonNull;
 
 public class DistinctLimitSpilledOperator
-    implements Operator
+        implements Operator
 {
+    private static final int MAX_BYTES_PER_CHANNEL = 256 * 1024 * 1024;
+
+    private ExternalPagesSortChannelMerger externalPagesSortChannelMerger;
+
+    private final OperatorContext operatorContext;
+    private final LocalMemoryContext localUserMemoryContext;
+
+    private long remainingLimit;
+    private boolean writeFinish;
+    private boolean readFinish;
 
     public static class DistinctLimitSpilledOperatorFactory
-        implements OperatorFactory
+            implements OperatorFactory
     {
         private final int operatorId;
         private final PlanNodeId planNodeId;
@@ -54,16 +64,16 @@ public class DistinctLimitSpilledOperator
         private final boolean enableSpill;
 
         public DistinctLimitSpilledOperatorFactory(
-            int operatorId,
-            PlanNodeId planNodeId,
-            List<? extends Type> sourceTypes,
-            List<Integer> distinctChannels,
-            long limit,
-            Optional<Integer> hashChannel,
-            JoinCompiler joinCompiler,
-            PagesIndex.Factory pagesIndexFactory,
-            SingleStreamSpillerFactory singleStreamSpillerFactory,
-            boolean enableSpill)
+                int operatorId,
+                PlanNodeId planNodeId,
+                List<? extends Type> sourceTypes,
+                List<Integer> distinctChannels,
+                long limit,
+                Optional<Integer> hashChannel,
+                JoinCompiler joinCompiler,
+                PagesIndex.Factory pagesIndexFactory,
+                SingleStreamSpillerFactory singleStreamSpillerFactory,
+                boolean enableSpill)
         {
             this.operatorId = operatorId;
             this.planNodeId = requireNonNull(planNodeId, "planNodeId is null");
@@ -85,8 +95,8 @@ public class DistinctLimitSpilledOperator
             checkState(!closed, "Factory is already closed");
             OperatorContext operatorContext = driverContext.addOperatorContext(operatorId, planNodeId, DistinctLimitOperator.class.getSimpleName());
             List<Type> distinctTypes = distinctChannels.stream()
-                .map(sourceTypes::get)
-                .collect(toImmutableList());
+                    .map(sourceTypes::get)
+                    .collect(toImmutableList());
             return new DistinctLimitSpilledOperator(operatorContext, distinctChannels, distinctTypes, limit, hashChannel, joinCompiler, pagesIndexFactory, singleStreamSpillerFactory);
         }
 
@@ -103,25 +113,14 @@ public class DistinctLimitSpilledOperator
         }
     }
 
-    private final static int MAX_BYTES_PER_CHANNEL = 256 * 1024 * 1024;
-
-    private final OperatorContext operatorContext;
-    private final LocalMemoryContext localUserMemoryContext;
-
-    private long remainingLimit;
-    private boolean writeFinish = false;
-    private boolean readFinish = false;
-
-    private ExternalPagesSortChannelMerger externalPagesSortChannelMerger;
-
     public DistinctLimitSpilledOperator(OperatorContext operatorContext,
-        List<Integer> distinctChannels,
-        List<Type> distinctTypes,
-        long limit,
-        Optional<Integer> hashChannel,
-        JoinCompiler joinCompiler,
-        PagesIndex.Factory factory,
-        SingleStreamSpillerFactory singleStreamSpillerFactory)
+            List<Integer> distinctChannels,
+            List<Type> distinctTypes,
+            long limit,
+            Optional<Integer> hashChannel,
+            JoinCompiler joinCompiler,
+            PagesIndex.Factory factory,
+            SingleStreamSpillerFactory singleStreamSpillerFactory)
     {
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
         this.localUserMemoryContext = operatorContext.localUserMemoryContext();
@@ -137,13 +136,13 @@ public class DistinctLimitSpilledOperator
         }
 
         this.externalPagesSortChannelMerger = new ExternalPagesSortChannelMerger(
-            distinctTypes,
-            sortChannels,
-            sortOrders,
-            factory,
-            singleStreamSpillerFactory,
-            this.operatorContext,
-            MAX_BYTES_PER_CHANNEL);
+                distinctTypes,
+                sortChannels,
+                sortOrders,
+                factory,
+                singleStreamSpillerFactory,
+                this.operatorContext,
+                MAX_BYTES_PER_CHANNEL);
         remainingLimit = limit;
     }
 
@@ -196,7 +195,6 @@ public class DistinctLimitSpilledOperator
     @Override
     public Page getOutput()
     {
-
         ListenableFuture<?> future = this.externalPagesSortChannelMerger.spillInProgress();
         if (future != null && !future.isDone()) {
             return null;
@@ -233,14 +231,14 @@ public class DistinctLimitSpilledOperator
     private boolean requestMemory()
     {
         long bytes = this.externalPagesSortChannelMerger.getEstimatedSize()
-            + PageBuilderStatus.DEFAULT_MAX_PAGE_SIZE_IN_BYTES * 2;
+                + PageBuilderStatus.DEFAULT_MAX_PAGE_SIZE_IN_BYTES * 2;
         this.localUserMemoryContext.setBytes(bytes);
         return operatorContext.isWaitingForMemory().isDone();
     }
 
     @Override
     public void close()
-        throws Exception
+            throws Exception
     {
         this.externalPagesSortChannelMerger.close();
     }
